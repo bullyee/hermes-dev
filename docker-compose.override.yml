@@ -1,0 +1,12 @@
+services:
+  gateway:
+    image: hermes-agent-dev-${DEV_NAME:?set DEV_NAME in .env}
+    container_name: hermes-${DEV_NAME}
+    volumes:
+      - ../data-${DEV_NAME}:/opt/data
+    environment:
+      - API_SERVER_PORT=${API_PORT:?set API_PORT in .env}
+      - API_SERVER_KEY=${API_SERVER_KEY:?set API_SERVER_KEY in .env}
+
+  dashboard:
+    profiles: ["dashboard"]
