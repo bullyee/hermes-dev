@@ -240,6 +240,34 @@ def _invalid(message: str) -> Tuple[str, str]:
     return "rejected", tool_error(message, success=False)
 
 
+def _memguard_gate(store: "MemoryStore", target: str, action: str, contents: List[Optional[str]],
+                   payload: Dict[str, Any], summary: str) -> Optional[str]:
+    """memguard LLM content check (research layer, off unless ``memguard.enabled``). A flagged
+    write the user can't answer now is staged like a write-approval write, for /memory approve."""
+    from memguard.adapters.hermes import guard_write
+    staged = []
+
+    def stage(decision):
+        if (unmatched := _pin_matched_entries(store, payload)) is not None:
+            return unmatched, None
+        from tools import write_approval as wa
+        v = decision.verdict
+        record = wa.stage_write(wa.MEMORY, payload, summary=f"memguard {v.category}: {summary}"[:200],
+                                origin=wa.current_origin())
+        where = ("review with /memory pending" if wa._slash_review_surface()
+                 else "review from an interactive CLI session with /memory pending")
+        staged.append(record["id"])
+        return json.dumps({"success": True, "staged": True, "pending_id": record["id"],
+                           "message": f"memguard flagged this write ({v.category}): {v.reason} "
+                                      f"Staged for the user's approval, not yet saved; {where}."},
+                          ensure_ascii=False), record["id"]
+
+    result = guard_write(f"builtin:{target}", action, contents, stage=stage)
+    if result is not None:
+        FAILURE_CLASS.set("staged" if staged else "scan_blocked")
+    return result
+
+
 def _memory_tool(action, target, content, old_text, new_text, operations, store) -> Tuple[str, str]:
     """``(outcome, result_json)``: ``rejected`` when refused or held before touching the store."""
     # An omitted optional string can arrive as "" (#90468): let the new_text alias fill it.
@@ -253,7 +281,12 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
     if operations:
         if not isinstance(operations, list):
             return _invalid("operations must be a list of {action, content?, old_text?} objects.")
-        denied = _background_delete_gate(store, action, operations, target)
+        denied = (_background_delete_gate(store, action, operations, target)
+                  or _memguard_gate(store, target, "batch",
+                                    [op.get("content") or op.get("new_text") for op in operations
+                                     if isinstance(op, dict) and op.get("action") in ("add", "replace")],
+                                    {"action": "batch", "target": target, "operations": operations},
+                                    f"apply {len(operations)} op(s) to {'user profile' if target == 'user' else 'memory'}"))
         if denied is not None:
             return "rejected", denied
         # Approval gate: stages (background/gateway) or prompts inline (CLI); off by default.
@@ -274,6 +307,11 @@ def _memory_tool(action, target, content, old_text, new_text, operations, store)
         return _invalid(f"Unknown action '{action}'. Use: add, replace, remove")
     invalid = (_validate_single_op(store, action, target, content, old_text)
                or _background_delete_gate(store, action, None, target, content, old_text)
+               or (_memguard_gate(store, target, action, [content],
+                                  {"action": action, "target": target, "content": content, "old_text": old_text},
+                                  _STORE_ACTIONS[action][1]("user profile" if target == "user" else "memory",
+                                                            content, old_text)[0])
+                   if action in ("add", "replace") else None)
                or _apply_write_gate(store, action, target, content, old_text))
     if invalid is not None:
         return "rejected", invalid

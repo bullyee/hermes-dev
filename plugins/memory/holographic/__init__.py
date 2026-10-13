@@ -179,6 +179,10 @@ class HolographicMemoryProvider(MemoryProvider):
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
         if tool_name not in self._TOOL_HANDLERS:
             return tool_error(f"Unknown tool: {tool_name}")
+        if tool_name == "fact_store" and args.get("action") in ("add", "update"):
+            from memguard.adapters.hermes import guard_write  # research layer, off unless memguard.enabled
+            if (refused := guard_write("holographic", args["action"], [args.get("content")])) is not None:
+                return refused
         try:
             return self._TOOL_HANDLERS[tool_name](self, args)
         except KeyError as exc:
