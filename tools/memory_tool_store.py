@@ -200,6 +200,15 @@ class MemoryStore:
             return (f"[BLOCKED: {filename} entry contained threat pattern(s): {', '.join(findings)}. "
                     f"Removed from system prompt; use memory(action=remove) to delete the original.]")
 
+        def _memguard(entry, target):
+            # memguard recall check (research layer, off unless memguard.enabled): the write judge, run
+            # again on what is actually on disk; snapshot only, like _sanitize. A flagged entry becomes a
+            # pending placeholder that format_for_system_prompt offers to the user.
+            if not entry or entry.startswith("[BLOCKED:"):
+                return entry
+            from memguard.adapters.hermes import screen_recall
+            return screen_recall("user profile" if target == "user" else "memory", entry)
+
         for target in ("memory", "user"):
             path = self._path_for(target)
             from hermes_constants import mkdir_under_hermes_home
@@ -215,7 +224,8 @@ class MemoryStore:
                 logger.warning("%s exceeds its char limit on load: %d/%d chars. Entries stay loaded; "
                                "further additions are blocked until it is back under the limit.",
                                path.name, count, limit)
-            self._system_prompt_snapshot[target] = self._render_block(target, [_sanitize(e, path.name) for e in entries])
+            self._system_prompt_snapshot[target] = self._render_block(
+                target, [_memguard(_sanitize(e, path.name), target) for e in entries])
 
     @staticmethod
     @contextmanager
@@ -524,7 +534,11 @@ class MemoryStore:
     def format_for_system_prompt(self, target: str) -> Optional[str]:
         """Frozen load-time snapshot (NOT live state — mid-session writes don't touch
         it, preserving the prefix cache); None if empty."""
-        return self._system_prompt_snapshot.get(target, "") or None
+        snapshot = self._system_prompt_snapshot.get(target, "")
+        if "WITHHELD by memguard #" in snapshot:  # first prompt build runs where the user can be asked
+            from memguard.adapters.hermes import resolve_pending
+            snapshot = self._system_prompt_snapshot[target] = resolve_pending(snapshot)
+        return snapshot or None
 
     def _success_response(self, target: str, message: str = None, **extra) -> Dict[str, Any]:
         """TERMINAL and WITHOUT the entries list: echoing entries invites the model to

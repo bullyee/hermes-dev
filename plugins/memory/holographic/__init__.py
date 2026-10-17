@@ -86,6 +86,25 @@ def _load_plugin_config() -> dict:
         return {}
 
 
+def _memguard_screen(result: str) -> str:
+    """memguard recall check on a fact_store read: a held fact's content is withheld unless the
+    user approves it for this session."""
+    from memguard.adapters.hermes import resolve_pending, screen_recall
+    try:
+        data = json.loads(result)
+    except (TypeError, ValueError):
+        return result
+
+    def walk(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("content"), str):
+                node = {**node, "content": resolve_pending(screen_recall("fact", node["content"]))}
+            return {k: walk(v) for k, v in node.items()}
+        return [walk(v) for v in node] if isinstance(node, list) else node
+
+    return json.dumps(walk(data))
+
+
 def _results(items: list, key: str = "results") -> str:
     return json.dumps({key: items, "count": len(items)})
 
@@ -167,7 +186,11 @@ class HolographicMemoryProvider(MemoryProvider):
             return ""
         try:
             results = self._retriever.search(query, min_trust=self._min_trust, limit=5)
-            lines = [f"- [{r.get('trust_score', r.get('trust', 0)):.1f}] {r.get('content', '')}" for r in results]
+            # memguard (research layer, off unless memguard.enabled): held facts become placeholders here, on the
+            # prefetch thread; MemoryManager.prefetch_all asks the user about them back on the agent thread.
+            from memguard.adapters.hermes import screen_recall
+            lines = [f"- [{r.get('trust_score', r.get('trust', 0)):.1f}] {screen_recall('fact', r.get('content', ''))}"
+                     for r in results]
             return "## Holographic Memory\n" + "\n".join(lines) if results else ""
         except Exception as e:
             logger.debug("Holographic prefetch failed: %s", e)
@@ -184,7 +207,10 @@ class HolographicMemoryProvider(MemoryProvider):
             if (refused := guard_write("holographic", args["action"], [args.get("content")])) is not None:
                 return refused
         try:
-            return self._TOOL_HANDLERS[tool_name](self, args)
+            result = self._TOOL_HANDLERS[tool_name](self, args)
+            if tool_name == "fact_store" and args.get("action") in self._READ_ACTIONS:
+                result = _memguard_screen(result)
+            return result
         except KeyError as exc:
             return tool_error(f"Missing required argument: {exc}")
         except Exception as exc:
@@ -218,6 +244,8 @@ class HolographicMemoryProvider(MemoryProvider):
     def _entity_query(self, method: str, a: dict) -> str:
         """'probe' / 'related': single-entity retriever queries."""
         return _results(getattr(self._retriever, method)(a["entity"], category=a.get("category"), limit=_limit(a)))
+
+    _READ_ACTIONS = ("search", "probe", "related", "reason", "contradict", "list")
 
     _TOOL_HANDLERS = {
         "fact_store": _tool_handler({

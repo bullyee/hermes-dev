@@ -452,7 +452,11 @@ class MemoryManager:
         parts = self._each_provider(
             "prefetch failed (non-fatal)", lambda p: self._prefetch_provider(p, clean_query, session_id=session_id),
         )
-        return "\n\n".join(p for p in parts if p and p.strip())
+        merged = "\n\n".join(p for p in parts if p and p.strip())
+        if "WITHHELD by memguard #" in merged:  # memguard: provider threads can't prompt; ask here
+            from memguard.adapters.hermes import resolve_pending
+            merged = resolve_pending(merged)
+        return merged
 
     def _prefetch_provider(self, provider: MemoryProvider, query: str, *, session_id: str = "") -> str:
         """Run one provider's prefetch; external providers are bounded by a timeout. A stuck external
