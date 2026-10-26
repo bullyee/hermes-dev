@@ -15,6 +15,10 @@ built-in memory when a session loads it, holographic facts on every prefetch and
 A blocked entry is withheld; a flagged one is withheld until the reader approves it for their
 session (``resolve_pending``). ``memguard.recall_timeout`` (default 30 s) bounds each uncached
 judge call; ``memguard.recall_cache: false`` re-judges on every read instead of reusing verdicts.
+Recall judge calls run with thinking off (``memguard.recall_thinking``, default false): a thinking
+judge takes ~30 s per entry, far past Hermes's 8 s holographic prefetch timeout. Even without
+thinking, a prefetch judges up to 5 uncached facts one by one (~12 s), so while memguard is
+enabled the prefetch bound is ``memguard.prefetch_timeout`` (default 20 s) instead of 8 s.
 """
 
 from __future__ import annotations
@@ -46,18 +50,33 @@ def enabled() -> bool:
         return False
 
 
-def _hermes_llm(system: str, user: str, *, timeout_key: str = "timeout", default_timeout: float = 180) -> str:
+def prefetch_timeout(default: float) -> float:
+    """MemoryManager's external prefetch bound: ``memguard.prefetch_timeout`` while enabled, else ``default``."""
+    if not enabled():
+        return default
+    try:
+        return float(_settings().get("prefetch_timeout", 20))
+    except (TypeError, ValueError):
+        logger.warning("memguard: bad prefetch_timeout; keeping %.0f s", default)
+        return default
+
+
+def _hermes_llm(system: str, user: str, *, timeout_key: str = "timeout", default_timeout: float = 180,
+                thinking: bool = True) -> str:
     from agent.auxiliary_client import call_llm, extract_content_or_reasoning
     settings = _settings()
     timeout = float(settings.get(timeout_key, default_timeout))
     # Optional own endpoint (same model): a single-request server would queue the judge behind the agent.
     response = call_llm(messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                        temperature=0.0, timeout=timeout, base_url=settings.get("base_url") or None)
+                        temperature=0.0, timeout=timeout, base_url=settings.get("base_url") or None,
+                        reasoning_config=None if thinking else {"enabled": False})
     return extract_content_or_reasoning(response) or ""
 
 
 def _recall_llm(system: str, user: str) -> str:
-    return _hermes_llm(system, user, timeout_key="recall_timeout", default_timeout=30)
+    from utils import is_truthy_value
+    thinking = is_truthy_value(_settings().get("recall_thinking"), default=False)
+    return _hermes_llm(system, user, timeout_key="recall_timeout", default_timeout=30, thinking=thinking)
 
 
 def _guard(llm=None) -> MemGuard:

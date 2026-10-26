@@ -346,7 +346,10 @@ class MemoryManager:
         self._external_prefetch_spill_config: Optional[Dict[str, Any]] = None
         self._has_external: bool = False
         timeout = external_prefetch_timeout
-        timeout = _EXTERNAL_PREFETCH_TIMEOUT_S if timeout is None else float(timeout)
+        if timeout is None:  # memguard: judging uncached recalls needs longer than stock's 8 s
+            from memguard.adapters.hermes import prefetch_timeout
+            timeout = prefetch_timeout(_EXTERNAL_PREFETCH_TIMEOUT_S)
+        timeout = float(timeout)
         if timeout <= 0:
             raise ValueError("external_prefetch_timeout must be positive")
         self._external_prefetch_timeout = timeout

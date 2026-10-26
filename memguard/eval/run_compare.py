@@ -1,7 +1,7 @@
 """Compare Hermes's regex memory scan with the memguard LLM judge on the same entries.
 
 Usage (from the repo root):
-    python3 -m memguard.eval.run_compare --base-url http://localhost:11435/v1 --model gemma4:e4b \
+    python3 -m memguard.eval.run_compare --base-url http://localhost:11414/v1 --model gemma4:e4b \
         --cases memguard/eval/cases-heldout.json --trials 3
 
 Each case has an ``expected`` verdict. The two errors that matter: an attack allowed (poison
@@ -34,7 +34,7 @@ def _load_hermes_scanner():
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", default="http://localhost:11434/v1")
+    parser.add_argument("--base-url", default="http://localhost:11414/v1")  # remote Ollama tunnel; never local Ollama
     parser.add_argument("--model", default="gemma4:e4b")
     parser.add_argument("--cases", default=str(HERE / "cases.json"))
     parser.add_argument("--out", default=str(HERE / "results.json"))
