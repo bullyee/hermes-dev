@@ -1,7 +1,7 @@
 """Build one Hermes config.yaml for an evaluation run from the E4 base and overlays.
 
     python3 evalcfg/build_config.py --arm defense --model e4b [--scenario asi06-2] \
-        [--set model.base_url=http://host.docker.internal:11414/v1] [--out config.yaml]
+        [--set memguard.timeout=45] [--out config.yaml]
 
 Merge order: base.yaml -> arms/<arm>.yaml -> models/<model>.yaml -> scenarios/<scenario>.yaml ->
 --set. Dicts merge key by key; a list or scalar from a later source replaces the earlier one.

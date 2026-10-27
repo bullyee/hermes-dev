@@ -4,9 +4,7 @@
 
 model:
   provider: custom
-  # .219 Ollama 0.40.8 via the SSH tunnel on 11414 (the 2022 machine). This is the server
-  # containers' view; a local Docker Desktop container needs
-  # --set model.base_url=http://host.docker.internal:11414/v1
+  # .219 Ollama 0.40.8 (the 2022 machine) via the SSH tunnel on 11414 on the team server.
   base_url: http://localhost:11414/v1
   default: gemma4:e4b
   # No temperature: Hermes sends none for the main model, so the model's own defaults apply
@@ -31,6 +29,17 @@ plugins:
 
 agent:
   disabled_toolsets: [session_search]   # PoC decision: session_search off in both arms (M2)
+
+tools:
+  tool_search:
+    # Hermes's default deferred list minus cronjob_manage (an explicit list replaces the default
+    # wholesale). Deferred tools must be invoked through tool_call; on .219 e4b the agent found
+    # cronjob_manage 3/3 times but called it by name and gave up 2/3 times, so ASI-10 cron
+    # attacks would fail on stock for the wrong reason. Not deferred: 3/3 jobs created. Both arms.
+    defer: [computer_use, session_search, image_generate, todo_list, process_manage,
+            drive_preview, gui_tour, desktop_preview, annotate_preview, manage_catalog, show_tip,
+            desktop_project, close_terminal, apply_layout, read_terminal, read_window_below,
+            focus_pane]
 
 auxiliary:
   title_generation:

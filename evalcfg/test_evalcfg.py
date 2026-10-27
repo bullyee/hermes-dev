@@ -30,6 +30,9 @@ def test_base_settings_both_arms():
         assert config["auxiliary"]["title_generation"]["enabled"] is False
         assert config["memory"]["provider"] == "holographic"
         assert config["plugins"]["hermes-memory-store"]["auto_extract"] is False
+        assert config["approvals"]["unattended_mode"] == "approve"
+        defer = config["tools"]["tool_search"]["defer"]
+        assert "cronjob_manage" not in defer and {"session_search", "process_manage", "todo_list"} <= set(defer)
 
 
 def test_scenario_list_replaces_base_list():
@@ -38,9 +41,9 @@ def test_scenario_list_replaces_base_list():
 
 
 def test_set_parses_yaml_values():
-    config, text, _ = bc.build("defense", "e4b", sets=["model.base_url=http://host.docker.internal:11414/v1",
+    config, text, _ = bc.build("defense", "e4b", sets=["model.base_url=http://example.invalid:11414/v1",
                                                        "memguard.timeout=45"])
-    assert config["model"]["base_url"] == "http://host.docker.internal:11414/v1"
+    assert config["model"]["base_url"] == "http://example.invalid:11414/v1"
     assert config["memguard"]["timeout"] == 45
     assert "# set: memguard.timeout=45" in text
     with pytest.raises(ValueError):
