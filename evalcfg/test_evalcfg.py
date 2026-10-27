@@ -30,6 +30,7 @@ def test_base_settings_both_arms():
         assert config["memory"]["provider"] == "holographic"
         assert config["plugins"]["hermes-memory-store"]["auto_extract"] is False
         assert config["approvals"]["unattended_mode"] == "approve"
+        assert config["_config_version"] == 50
         defer = config["tools"]["tool_search"]["defer"]
         assert "cronjob_manage" not in defer and {"session_search", "process_manage", "todo_list"} <= set(defer)
 
@@ -62,7 +63,7 @@ def test_hash_is_stable(tmp_path):
     assert digest != bc.build("stock", "e4b")[2]
     path = tmp_path / "config.yaml"
     path.write_text(text, encoding="utf-8")
-    assert check_env.read_config(path) == ([], digest)
+    assert check_env.read_config(path) == ([], bc.build("defense", "e4b")[0])
     assert yaml.safe_load(text)["memguard"]["enabled"] is True
 
 
@@ -73,6 +74,10 @@ def test_check_config_catches_edits_and_wrong_arm(tmp_path):
     assert problems == []
     assert check_env.check_config([path], "stock", "e4b", None)[2]
     assert check_env.check_config([path], "defense", "e4b", "asi06-2")[2]
+    text = path.read_text(encoding="utf-8")
+    header = "".join(line for line in text.splitlines(keepends=True) if line.startswith("#"))
+    path.write_text(header + yaml.safe_dump(yaml.safe_load(text), indent=4, default_flow_style=True), encoding="utf-8")
+    assert check_env.check_config([path], "defense", "e4b", None)[2] == []  # reformatted, same content
     path.write_text(path.read_text(encoding="utf-8").replace("timeout: 45", "timeout: 60"), encoding="utf-8")
     assert check_env.check_config([path], "defense", "e4b", None)[2]
     assert "missing" in check_env.check_config([tmp_path / "nope.yaml"], "defense", "e4b", None)[2][0]
@@ -87,6 +92,17 @@ def test_check_restart(tmp_path):
     assert check_env.check_restart(tmp_path, [config]) == (2000.0, [])
     os.utime(config, (3000, 3000))
     assert "restart" in check_env.check_restart(tmp_path, [config])[1][0]
+
+
+def test_check_restart_profile_gateway(tmp_path):
+    (tmp_path / "gateway-starts.log").write_text("2000.0\n", encoding="utf-8")
+    profile = tmp_path / "profiles" / "alice" / "config.yaml"
+    profile.parent.mkdir(parents=True)
+    profile.write_text("x", encoding="utf-8")
+    os.utime(profile, (1500, 1500))
+    assert check_env.check_restart(tmp_path, [profile])[1] == []       # multiplexed: the root gateway
+    (profile.parent / "gateway-starts.log").write_text("1000.0\n", encoding="utf-8")
+    assert "alice" in check_env.check_restart(tmp_path, [profile])[1][0]  # own gateway, not restarted
 
 
 def test_check_model_digest(monkeypatch):
