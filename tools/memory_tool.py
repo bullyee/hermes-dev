@@ -251,14 +251,14 @@ def _memguard_gate(store: "MemoryStore", target: str, action: str, contents: Lis
         if (unmatched := _pin_matched_entries(store, payload)) is not None:
             return unmatched, None
         from tools import write_approval as wa
-        v = decision.verdict
-        record = wa.stage_write(wa.MEMORY, payload, summary=f"memguard {v.category}: {summary}"[:200],
+        category = decision.verdict.category
+        record = wa.stage_write(wa.MEMORY, payload, summary=f"memguard {category}: {summary}"[:200],
                                 origin=wa.current_origin())
         where = ("review with /memory pending" if wa._slash_review_surface()
                  else "review from an interactive CLI session with /memory pending")
         staged.append(record["id"])
         return json.dumps({"success": True, "staged": True, "pending_id": record["id"],
-                           "message": f"memguard flagged this write ({v.category}): {v.reason} "
+                           "message": f"memguard flagged this write ({category}): {decision.reason} "
                                       f"Staged for the user's approval, not yet saved; {where}."},
                           ensure_ascii=False), record["id"]
 

@@ -5,10 +5,12 @@ baseline). ``memguard.timeout`` sets the judge call timeout in seconds (default 
 local model needs most of that). ``memguard.base_url`` sends judge calls to their own
 OpenAI-compatible endpoint (default: the agent's own).
 
-A ``flag`` verdict goes to the user through Hermes's own memory-approval prompt (the harness
-shows it, so text in the conversation cannot answer it). When nobody can answer (gateway
-without a prompt, ``hermes chat -q``, cron, background review), a caller that passes ``stage``
-puts the write into Hermes's pending store for ``/memory approve``; otherwise it is refused.
+Each write carries a stamp (``_make_stamp``: profile, session, turn, origin) into the gate's
+policy step. A write the policy stages goes to the user through Hermes's own memory-approval
+prompt (the harness shows it, so text in the conversation cannot answer it). When nobody can
+answer (gateway without a prompt, ``hermes chat -q``, cron, background review), a caller that
+passes ``stage`` puts the write into Hermes's pending store for ``/memory approve``; otherwise
+it is refused.
 
 On read (``screen_recall``), entries are checked with the same judge before the agent sees them:
 built-in memory when a session loads it, holographic facts on every prefetch and fact_store read.
@@ -32,6 +34,7 @@ from typing import Callable, Iterable, Optional, Tuple
 
 from memguard.gate import Decision, MemGuard, refusal_message
 from memguard.judge import Verdict
+from memguard.types import Stamp
 
 logger = logging.getLogger("memguard")
 
@@ -94,8 +97,28 @@ def _ask_user(decision: Decision) -> Optional[bool]:
     from tools import write_approval as wa
     if wa.current_origin() == "background_review":
         return None
-    v = decision.verdict
-    return wa._prompt_inline_memory_approval(f"memguard flagged this ({v.category}): {v.reason}", decision.content)
+    return wa._prompt_inline_memory_approval(f"memguard flagged this ({decision.verdict.category}): {decision.reason}",
+                                             decision.content)
+
+
+def _make_stamp() -> Stamp:
+    """Who and where the current write comes from. principal, session and turn are best effort
+    until M1 checks them under multiplexed profiles; tainted and delegated_from stay unset until M3."""
+    from tools import write_approval as wa
+    principal = session_id = turn_id = ""
+    try:
+        from hermes_cli.profiles import current_profile_name
+        principal = current_profile_name("default") or "default"
+    except Exception:
+        logger.debug("memguard: no profile name for the stamp", exc_info=True)
+    try:
+        from tools.approval_context import _approval_session_id, _approval_turn_id
+        session_id, turn_id = _approval_session_id.get(), _approval_turn_id.get()
+    except Exception:
+        logger.debug("memguard: no session/turn id for the stamp", exc_info=True)
+    origin = "background_review" if wa.current_origin() == "background_review" else "user_turn"
+    return Stamp(principal=principal, session_id=session_id or _session(), turn_id=turn_id or None,
+                 origin=origin, delegated_from=None, tainted=False, taint_sources=(), user_confirmed=False)
 
 
 def guard_write(store: str, action: str, contents: Iterable[Optional[str]],
@@ -104,14 +127,15 @@ def guard_write(store: str, action: str, contents: Iterable[Optional[str]],
     if not enabled():
         return None
     guard = _guard()
+    stamp = _make_stamp()
     for content in contents:
         if not content or not content.strip():
             continue
-        decision = guard.check_write(content, store=store, action=action)
-        logger.info("memguard %s %s/%s: %s (%s, %.1fs)", decision.id, store, action,
-                    decision.verdict.verdict, decision.verdict.category, decision.seconds)
+        decision = guard.check_write(content, store=store, action=action, stamp=stamp)
+        logger.info("memguard %s %s/%s: %s by %s (%s, %.1fs)", decision.id, store, action, decision.outcome,
+                    decision.policy.rule, decision.verdict.category, decision.seconds)
         review = None
-        if decision.verdict.verdict == "flag":
+        if decision.outcome == "stage":
             answer = _ask_user(decision)
             if answer is None and stage is not None:
                 result, pending_id = stage(decision)
@@ -121,7 +145,8 @@ def guard_write(store: str, action: str, contents: Iterable[Optional[str]],
             guard.record_review(decision, review)
         if (message := refusal_message(decision, review)) is not None:
             return json.dumps({"success": False, "error": message, "memguard": {
-                "id": decision.id, "verdict": decision.verdict.verdict, "category": decision.verdict.category}},
+                "id": decision.id, "verdict": decision.verdict.verdict, "category": decision.verdict.category,
+                "outcome": decision.outcome, "rule": decision.policy.rule}},
                 ensure_ascii=False)
     return None
 

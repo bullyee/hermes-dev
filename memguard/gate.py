@@ -1,10 +1,11 @@
 """Write gate: turns a judge verdict into commit / ask a human / refuse, and logs every decision.
 
-``allow`` commits, ``flag`` goes to a human (the adapter asks inline or stages the write for
-later review), ``block`` refuses it. Every decision (allow included) goes to ``decisions.jsonl``,
-and the human's answer to a flag is appended there as a review record, so a run can be scored
-afterwards (including how often a flag was a false alarm). A flag nobody could review is also
-kept in ``quarantine.jsonl``.
+A write runs judge -> conflict check -> allowlist -> policy. The policy's outcome decides:
+``commit`` writes, ``stage`` goes to a human (the adapter asks inline or stages the write for
+later review), ``block`` refuses it. Every decision (commit included) goes to ``decisions.jsonl``
+as one line with the stamp and each step's result, and the human's answer to a staged write is
+appended there as a review record, so a run can be scored afterwards (including how often a
+flag was a false alarm). A staged write nobody could review is also kept in ``quarantine.jsonl``.
 
 The same judge runs again when memory is read back (``check_recall``), so an entry that reached
 disk without passing the write check (hand edit, another writer, an older rule set) is caught
@@ -20,11 +21,16 @@ import json
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Optional
 
+from memguard import allowlist, conflict, policy
+from memguard.baseline import load as load_baseline
 from memguard.judge import LLM, RULES_VERSION, Verdict, judge_entry
+from memguard.types import AllowlistResult, ConflictResult, PolicyDecision, Stamp
+
+_OUTCOME_BY_VERDICT = {"allow": "commit", "flag": "stage", "block": "block"}
 
 
 @dataclass(frozen=True)
@@ -35,10 +41,24 @@ class Decision:
     content: str
     verdict: Verdict
     seconds: float
+    # Write path only; a recall decision has the verdict alone.
+    stamp: Optional[Stamp] = None
+    conflict: Optional[ConflictResult] = None
+    allowlist: Optional[AllowlistResult] = None
+    policy: Optional[PolicyDecision] = None
+
+    @property
+    def outcome(self) -> str:
+        """``commit``, ``stage`` or ``block``: the policy's, else the verdict's own mapping."""
+        return self.policy.outcome if self.policy else _OUTCOME_BY_VERDICT[self.verdict.verdict]
+
+    @property
+    def reason(self) -> str:
+        return self.policy.reason if self.policy else self.verdict.reason
 
     @property
     def commits(self) -> bool:
-        return self.verdict.verdict == "allow"
+        return self.outcome == "commit"
 
 
 class MemGuard:
@@ -47,9 +67,19 @@ class MemGuard:
         self._dir = Path(state_dir)
         self._lock = threading.Lock()
 
-    def check_write(self, content: str, *, store: str, action: str) -> Decision:
+    def check_write(self, content: str, *, store: str, action: str, stamp: Optional[Stamp] = None) -> Decision:
         decision = self._judge(content, store, action)
         self._cache(content, decision)
+        found = unknown = None
+        try:
+            baseline = load_baseline()
+            found = conflict.check(content, baseline, self._llm)
+            unknown = allowlist.check(content, baseline)
+            decided = policy.decide(decision.verdict, stamp, found, unknown, store=store, action=action)
+        except Exception as exc:  # like a judge failure: hold the write, never pass it
+            decided = PolicyDecision("stage", "R-error", f"policy step failed: {exc}")
+        decision = replace(decision, stamp=stamp, conflict=found, allowlist=unknown, policy=decided)
+        self._log(decision)
         return decision
 
     def check_recall(self, content: str, *, store: str, use_cache: bool = True) -> Verdict:
@@ -59,6 +89,7 @@ class MemGuard:
         if use_cache and (cached := self.lookup(content)) is not None:
             return cached
         decision = self._judge(content, store, "recall")
+        self._log(decision)
         self._cache(content, decision)
         return decision.verdict
 
@@ -94,10 +125,10 @@ class MemGuard:
     def _judge(self, content: str, store: str, action: str) -> Decision:
         started = time.monotonic()
         verdict = judge_entry(content, self._llm)
-        decision = Decision(uuid.uuid4().hex[:8], store, action, content, verdict,
-                            round(time.monotonic() - started, 2))
-        self._append("decisions.jsonl", {**asdict(decision), "verdict": asdict(verdict), "at": time.time()})
-        return decision
+        return Decision(uuid.uuid4().hex[:8], store, action, content, verdict, round(time.monotonic() - started, 2))
+
+    def _log(self, decision: Decision) -> None:
+        self._append("decisions.jsonl", {**asdict(decision), "at": time.time()})
 
     def _cache(self, content: str, decision: Decision) -> None:
         if not decision.verdict.error:
@@ -124,16 +155,16 @@ def _key(content: str) -> str:
 
 def refusal_message(decision: Decision, review: Optional[str] = None) -> Optional[str]:
     """Model-facing text for a write that did not commit, or None when it may proceed.
-    ``review`` is the human's answer to a flag (see ``MemGuard.record_review``)."""
-    v = decision.verdict
-    if v.verdict == "block":
-        return f"memguard blocked this memory write ({v.category}): {v.reason} Nothing was saved."
-    if v.verdict == "flag":
+    ``review`` is the human's answer to a staged write (see ``MemGuard.record_review``)."""
+    category = decision.verdict.category
+    if decision.outcome == "block":
+        return f"memguard blocked this memory write ({category}): {decision.reason} Nothing was saved."
+    if decision.outcome == "stage":
         if review == "approved":
             return None
         if review == "denied":
-            return (f"memguard flagged this memory write ({v.category}) and the user declined to save it. "
+            return (f"memguard flagged this memory write ({category}) and the user declined to save it. "
                     f"Nothing was saved.")
-        return (f"memguard held this memory write for human review ({v.category}): {v.reason} "
+        return (f"memguard held this memory write for human review ({category}): {decision.reason} "
                 f"No reviewer was available, so nothing was saved (id {decision.id}).")
     return None
