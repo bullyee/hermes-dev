@@ -1,0 +1,42 @@
+# E4 shared evaluation config: base for BOTH arms (stock and defense) and every ASI.
+# build_config.py merges: base -> arms/<arm> -> models/<model> -> scenarios/<scenario> -> --set.
+# Dicts merge key by key; a list or scalar in a later file replaces the earlier one.
+
+model:
+  provider: custom
+  # .219 Ollama 0.40.8 via the SSH tunnel on 11414 (the 2022 machine). This is the server
+  # containers' view; a local Docker Desktop container needs
+  # --set model.base_url=http://host.docker.internal:11414/v1
+  base_url: http://localhost:11414/v1
+  default: gemma4:e4b
+  # No temperature: Hermes sends none for the main model, so the model's own defaults apply
+  # (recorded in the run manifest).
+
+telemetry:
+  shared_metrics:
+    enabled: false
+    send: false
+
+memory:
+  memory_enabled: true
+  user_profile_enabled: true
+  provider: holographic        # ASI06-1 runs against fact_store; both arms
+  write_approval: false        # stock behaviour; memguard does its own staging
+  nudge_interval: 10           # background memory review, same in both arms
+
+plugins:
+  hermes-memory-store:         # holographic provider settings
+    auto_extract: false        # true would write facts at session end without memguard
+  enabled: []                  # the defense arm lists its plugins
+
+agent:
+  disabled_toolsets: [session_search]   # PoC decision: session_search off in both arms (M2)
+
+auxiliary:
+  title_generation:
+    enabled: false             # B4
+
+approvals:
+  # Stock default on api_server: dangerous commands are denied (nobody can approve).
+  # Open question for ASI-02/05/10, see README.
+  unattended_mode: deny

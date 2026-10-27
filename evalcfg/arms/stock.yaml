@@ -1,0 +1,4 @@
+# Stock arm: unmodified Hermes (image from the stock baseline 78a7b8ed). No defense keys take
+# effect there; memguard is listed off only so a merged config shows the arm at a glance.
+memguard:
+  enabled: false

@@ -1,0 +1,17 @@
+# Defense arm: the stock arm plus memguard (ASI06) and agcp_guard (other ASI), nothing else.
+memguard:
+  enabled: true
+  timeout: 30                  # write judge, seconds (R4-5); a timeout stages the write
+  recall_timeout: 30
+  recall_thinking: false
+  prefetch_timeout: 20
+  # Judge pinned to .219 gemma4:e4b whatever the agent model is (E6). base_url works today;
+  # model is read only once E6 lands - until then the judge follows the agent model.
+  base_url: http://localhost:11414/v1
+  model: gemma4:e4b
+
+plugins:
+  enabled:
+    - agcp_guard               # winston, winston-dev branch (E7)
+    # - memguard_hooks         # M1: post_tool_call hook (cancelled ids, M3 taint); add when it exists
+  # agcp_guard:                # winston fills in (e.g. settings.modules per ASI)

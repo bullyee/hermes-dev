@@ -1,0 +1,3 @@
+# Local large model, N=5 per scenario. Not on the 2022 instance yet (task list Q8).
+model:
+  default: gemma4:26b
