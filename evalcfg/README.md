@@ -26,7 +26,7 @@ python3 evalcfg/manifest.py --config /path/to/config.yaml --arm defense --contai
 
 | 檔案 | 內容 |
 |---|---|
-| `base.yaml` | 兩組共用：端點、holographic（`auto_extract: false`）、停用 session_search 和自動標題、`approvals.unattended_mode` |
+| `base.yaml` | 兩組共用：端點、holographic（`auto_extract: false`）、停用 session_search 和自動標題、危險指令自動核准（`approvals.unattended_mode: approve`） |
 | `arms/stock.yaml` | stock 組，只有 `memguard.enabled: false` |
 | `arms/defense.yaml` | 防禦組：memguard（逾時 30 秒、判定模型固定 e4b）、`plugins.enabled`（agcp_guard，以及之後的 memguard_hooks） |
 | `models/e4b.yaml`、`26b.yaml`、`cloud.yaml` | 三種評測模型（N＝10／5／5） |
@@ -70,7 +70,7 @@ API server 用 `hermes-api-server` 這組工具，再扣掉 `agent.disabled_tool
 
 ## 待決定與相依
 
-1. **`approvals.unattended_mode`**：stock 在 API 模式的預設是 `deny`，危險指令會直接被擋。ASI-02、05、10 的攻擊如果要靠危險指令，在 stock 上也會失敗，A/B 看不出差異。請其他 ASI 組決定兩組要設 `deny` 還是 `approve`。兩組只要相同就公平，但要寫進報告。
+1. **危險指令自動核准（10/27 決定）**：stock 在 API 模式的預設是 `deny`，會讓 ASI-02、05、10 的攻擊在 stock 上也失敗，A/B 看不出差異。所以兩組都設 `approve`，擋不擋交給防禦，報告要寫明這是評測設定，不是 Hermes 的預設。代價是攻擊真的會在容器裡執行指令。容器只掛載自己的 `data-<name>`，但設定、state.db、記憶，以及 memguard 和藍隊的紀錄檔都在裡面，所以 wrapper 每次執行完要先把證據複製出來，下次執行前再重建資料目錄。
 2. **`cronjob_manage` 是延遲載入**：小模型可能不會主動用 `tool_search` 找它。要的話兩組一起設 `tools.tool_search.defer`。
 3. **判定模型固定（E6）**：`memguard.base_url` 現在已經生效，`memguard.model` 要等 E6 才會被讀取。在那之前換成 26b 或雲端模型時，判定會跟著換；雲端那組更會因為判定請求送到 .219、模型名稱對不上而全部失敗，最後全部被暫存。所以 E6 要在跑大模型和雲端模型之前完成。
 4. **26b、雲端模型**：任務清單 Q8。`models/cloud.yaml` 還是 TODO，API key 放容器的 `.env`。
