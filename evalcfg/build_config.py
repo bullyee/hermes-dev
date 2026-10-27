@@ -5,8 +5,9 @@
 
 Merge order: base.yaml -> arms/<arm>.yaml -> models/<model>.yaml -> scenarios/<scenario>.yaml ->
 --set. Dicts merge key by key; a list or scalar from a later source replaces the earlier one.
-The output starts with a comment naming its sources and the sha256 of the config body, which the
-run manifest records. A value still set to TODO is refused (--allow-todo to inspect a draft).
+The output starts with a comment naming its sources, any --set items and the sha256 of the config
+body; check_env.py rebuilds from that header to tell whether a container has this exact config.
+A value still set to TODO is refused (--allow-todo to inspect a draft).
 
 Runs on the team server's Python 3.8 with PyYAML; no Hermes import.
 """

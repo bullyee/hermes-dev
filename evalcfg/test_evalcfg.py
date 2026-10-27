@@ -1,16 +1,15 @@
-"""E4 config builder and run manifest; no Hermes, no model.
+"""E4 config builder and pre-batch check; no Hermes, no model.
 
     python3 -m pytest evalcfg -q
 """
 
-import argparse
-import json
+import os
 
 import pytest
 import yaml
 
 from evalcfg import build_config as bc
-from evalcfg import manifest
+from evalcfg import check_env
 
 
 def test_arms_differ_only_by_the_defense():
@@ -57,30 +56,56 @@ def test_todo_refused_unless_allowed():
     assert config["model"]["default"] == "TODO"
 
 
-def test_hash_is_stable_and_matches_manifest(tmp_path):
+def test_hash_is_stable(tmp_path):
     _, text, digest = bc.build("defense", "e4b")
     assert digest == bc.build("defense", "e4b")[2]
     assert digest != bc.build("stock", "e4b")[2]
     path = tmp_path / "config.yaml"
     path.write_text(text, encoding="utf-8")
-    facts = manifest.config_facts(path)
-    assert facts["config_sha256"] == facts["header_sha256"] == digest
+    assert check_env.read_config(path) == ([], digest)
     assert yaml.safe_load(text)["memguard"]["enabled"] is True
 
 
-def test_manifest_records_unreachable_model_without_guessing(tmp_path):
-    _, text, _ = bc.build("defense", "e4b", sets=["model.base_url=http://127.0.0.1:9/v1",
-                                                  "memguard.base_url=http://127.0.0.1:9/v1"])
-    (tmp_path / "config.yaml").write_text(text, encoding="utf-8")
-    home = tmp_path / "home"
-    (home / "skills" / "demo").mkdir(parents=True)
-    (home / "SOUL.md").write_text("soul", encoding="utf-8")
-    args = argparse.Namespace(config=str(tmp_path / "config.yaml"), arm="defense", container="c", scenario="ASI06-1A",
-                              trial=1, code_commit="abc", redteam_commit=None, hermes_home=str(home),
-                              session=["s1"], run_id="r1")
-    record = manifest.build_manifest(args)
-    json.dumps(record)
-    assert record["schema"] == manifest.SCHEMA and record["run_id"] == "r1"
-    assert "error" in record["agent_model"] and "digest" not in record["agent_model"]
-    assert record["judge_model"]["model"] == "gemma4:e4b"
-    assert record["data_dir"]["skills"] == ["demo"] and record["data_dir"]["soul_sha256"]
+def test_check_config_catches_edits_and_wrong_arm(tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text(bc.build("defense", "e4b", sets=["memguard.timeout=45"])[1], encoding="utf-8")
+    _, _, problems = check_env.check_config([path], "defense", "e4b", None)
+    assert problems == []
+    assert check_env.check_config([path], "stock", "e4b", None)[2]
+    assert check_env.check_config([path], "defense", "e4b", "asi06-2")[2]
+    path.write_text(path.read_text(encoding="utf-8").replace("timeout: 45", "timeout: 60"), encoding="utf-8")
+    assert check_env.check_config([path], "defense", "e4b", None)[2]
+    assert "missing" in check_env.check_config([tmp_path / "nope.yaml"], "defense", "e4b", None)[2][0]
+
+
+def test_check_restart(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("x", encoding="utf-8")
+    assert check_env.check_restart(tmp_path, [config])[1]
+    os.utime(config, (1000, 1000))
+    (tmp_path / "gateway-starts.log").write_text("900.5\n2000.0\n", encoding="utf-8")
+    assert check_env.check_restart(tmp_path, [config]) == (2000.0, [])
+    os.utime(config, (3000, 3000))
+    assert "restart" in check_env.check_restart(tmp_path, [config])[1][0]
+
+
+def test_check_model_digest(monkeypatch):
+    replies = {"/api/version": {"version": "0.40.8"},
+               "/api/tags": {"models": [{"name": "gemma4:e4b", "digest": "dc35e8d9c606" + "0" * 52},
+                                        {"name": "gemma4:26b", "digest": "5571076f3d70" + "0" * 52}]},
+               "/api/show": {"parameters": "temperature                    1\ntop_k   64\ntop_p  0.95\nstop  \"<eos>\""}}
+    monkeypatch.setattr(check_env, "_get", lambda url, body=None: replies[url[url.index("/api/"):]])
+    summary, problems = check_env.check_model("agent", "http://h:11414/v1", "gemma4:e4b")
+    assert problems == [] and summary == "agent gemma4:e4b dc35e8d9c606 (Ollama 0.40.8; temperature 1 top_k 64 top_p 0.95)"
+    assert check_env.check_model("judge", "http://h:11414/v1", "gemma4:e4b", "temperature 0")[0].endswith("(Ollama 0.40.8; temperature 0)")
+    assert "expected 001e5dafc3c7" in check_env.check_model("agent", "http://h:11414/v1", "gemma4:26b")[1][0]
+    assert check_env.check_model("agent", "https://cloud.invalid/v1", "some-cloud-model") == ("agent some-cloud-model (no digest)", [])
+
+
+def test_check_model_unreachable():
+    _, problems = check_env.check_model("judge", "http://127.0.0.1:9/v1", "gemma4:e4b")
+    assert "cannot reach Ollama" in problems[0]
+
+
+def test_no_plugins_needs_no_container():
+    assert check_env.check_plugins("no-such-container", []) == []

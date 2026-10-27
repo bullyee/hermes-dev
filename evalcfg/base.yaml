@@ -8,7 +8,7 @@ model:
   base_url: http://localhost:11414/v1
   default: gemma4:e4b
   # No temperature: Hermes sends none for the main model, so the model's own defaults apply
-  # (recorded in the run manifest).
+  # (check_env.py prints them for the report's environment table).
 
 telemetry:
   shared_metrics:
