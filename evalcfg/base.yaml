@@ -37,6 +37,7 @@ auxiliary:
     enabled: false             # B4
 
 approvals:
-  # Stock default on api_server: dangerous commands are denied (nobody can approve).
-  # Open question for ASI-02/05/10, see README.
-  unattended_mode: deny
+  # api_server has nobody to approve dangerous commands. Stock default is deny, which would block
+  # ASI-02/05/10 attacks on the stock arm too; approve runs them in both arms (decided 10/27), so
+  # stopping them is left to the defense. The container only mounts its own data dir.
+  unattended_mode: approve
