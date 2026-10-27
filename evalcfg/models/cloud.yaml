@@ -1,0 +1,6 @@
+# Cloud model, N=5 per scenario. Which model and provider is still open (task list Q8);
+# fill provider/base_url/default and put its API key in the container's .env, not here.
+model:
+  provider: custom
+  base_url: TODO
+  default: TODO

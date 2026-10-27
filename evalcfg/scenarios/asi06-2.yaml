@@ -1,0 +1,8 @@
+# ASI06-2 only (Q3): every tool that can open another profile's memory files is off in BOTH
+# arms - terminal, file, and code_execution (execute_code runs Python that can open any file) -
+# so the cross-profile memory test covers the memory tools alone. The list replaces base's, so
+# session_search stays in it.
+agent:
+  disabled_toolsets: [session_search, terminal, file, code_execution]
+# The defense arm also runs multiplexed profiles (M5): write this config into every profile's
+# config.yaml, not only the root one.
