@@ -52,12 +52,12 @@ python3 evalcfg/build_config.py --arm defense --model e4b --set 'plugins.enabled
 | 設定 | Hermes 預設 | 評測用 | 原因 |
 |---|---|---|---|
 | `model` | 未設 | .219 的 Ollama（經伺服器 11414 的 tunnel），模型見 `models/` | 評測端點 |
-| `memory.provider` | 內建記憶（MEMORY.md、USER.md） | `holographic` | ASI06-1 要打 `fact_store` |
+| `memory.provider` | 只有內建記憶（MEMORY.md、USER.md） | `holographic` | ASI06-1 要打 `fact_store`；兩組都是內建記憶加 holographic |
 | `agent.disabled_toolsets` | 無 | `[session_search]` | R3b：會撈回舊對話；PoC 停用，列為已知限制（M2） |
 | `auxiliary.title_generation.enabled` | `true` | `false` | R3b：被中止的輸入仍會送去產生標題（B4） |
 | `tools.tool_search.defer` | 含 `cronjob_manage` | 拿掉 `cronjob_manage` | 延遲載入時 e4b 有 2/3 次叫不到，ASI-10 會在 stock 因為這個原因失敗；拿掉後 e4b、26b 都 3/3 建立排程 |
 | `approvals.unattended_mode` | `deny` | `approve` | API 模式沒有人能按核准，預設會讓 ASI-02、05、10 在 stock 也失敗；擋不擋交給防禦。報告要寫明這是評測設定（任務清單 Q13） |
-| `plugins.enabled` | 未設 | `[]` | stock 不載入外掛 plugin；防禦組另列 |
+| `plugins.enabled` | 未設 | `[]` | 只管掛 hook 的 plugin（agcp_guard 這類）：stock 一個都不開，防禦組另列。holographic 是記憶 provider，由 `memory.provider` 啟用，不受這項影響 |
 | `_config_version` | 未設 | `50` | 不寫的話容器重開時 Hermes 會改寫 `config.yaml`，`check_env.py` 就報設定不符 |
 
 holographic 的 `auto_extract: false` 跟 Hermes 預設相同，仍寫明，因為開了會在 session 結束時繞過 memguard 寫入記憶。

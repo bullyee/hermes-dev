@@ -22,7 +22,10 @@ memory:
 plugins:
   hermes-memory-store:         # holographic provider settings
     auto_extract: false        # Hermes default too; pinned because true writes facts at session end without memguard
-  enabled: []                  # no standalone plugins on stock; the defense arm lists its own
+  # Hook plugins only (agcp_guard and the like): none on stock, the defense arm lists its own.
+  # holographic is a memory provider: memory.provider above turns it on in both arms, whatever
+  # this list says.
+  enabled: []
 
 agent:
   disabled_toolsets: [session_search]   # R3b: it retrieves old sessions; off in both arms (M2)
