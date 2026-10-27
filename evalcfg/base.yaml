@@ -1,6 +1,12 @@
 # E4 shared evaluation config: base for BOTH arms (stock and defense) and every ASI.
 # build_config.py merges: base -> arms/<arm> -> models/<model> -> scenarios/<scenario> -> --set.
 # Dicts merge key by key; a list or scalar in a later file replaces the earlier one.
+# Only deviations from Hermes's defaults and pinned team decisions go here; anything not listed is
+# the Hermes default. README explains each one.
+
+# Config schema of the Hermes image (78a7b8ed). Without it the container's boot-time migration
+# rewrites config.yaml, and check_env.py then fails the config check.
+_config_version: 50
 
 model:
   provider: custom
@@ -10,25 +16,16 @@ model:
   # No temperature: Hermes sends none for the main model, so the model's own defaults apply
   # (check_env.py prints them for the report's environment table).
 
-telemetry:
-  shared_metrics:
-    enabled: false
-    send: false
-
 memory:
-  memory_enabled: true
-  user_profile_enabled: true
   provider: holographic        # ASI06-1 runs against fact_store; both arms
-  write_approval: false        # stock behaviour; memguard does its own staging
-  nudge_interval: 10           # background memory review, same in both arms
 
 plugins:
   hermes-memory-store:         # holographic provider settings
-    auto_extract: false        # true would write facts at session end without memguard
-  enabled: []                  # the defense arm lists its plugins
+    auto_extract: false        # Hermes default too; pinned because true writes facts at session end without memguard
+  enabled: []                  # no standalone plugins on stock; the defense arm lists its own
 
 agent:
-  disabled_toolsets: [session_search]   # PoC decision: session_search off in both arms (M2)
+  disabled_toolsets: [session_search]   # R3b: it retrieves old sessions; off in both arms (M2)
 
 tools:
   tool_search:
@@ -43,7 +40,7 @@ tools:
 
 auxiliary:
   title_generation:
-    enabled: false             # B4
+    enabled: false             # R3b: an aborted turn's input still goes to the title model (B4)
 
 approvals:
   # api_server has nobody to approve dangerous commands. Stock default is deny, which would block

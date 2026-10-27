@@ -4,11 +4,11 @@
         --container hermes-austin --arm defense --model e4b [--scenario asi06-2] [--profile alice ...]
 
 Exits 1 if any check fails:
-1. config: config.yaml (and each --profile's) is exactly what build_config.py builds for this
-   arm/model/scenario plus the --set lines in its header: not hand-edited, not another arm, and
-   the overlays have not changed since it was written.
-2. restart: the gateway started after the newest of those config files was written (Hermes reads
-   its config only at start).
+1. config: config.yaml (and each --profile's) has the same content as what build_config.py builds
+   for this arm/model/scenario plus the --set lines in its header: not hand-edited, not another
+   arm, and the overlays have not changed since it was written.
+2. restart: the gateway started after its config was written (Hermes reads its config at start).
+   A profile with its own gateway has its own gateway-starts.log; otherwise the root one counts.
 3. models: the agent model, and on the defense arm the memguard judge, have the expected Ollama
    digest at the config's endpoint. A model not in DIGESTS (cloud) is reported without one.
 4. plugins: every name in plugins.enabled is installed and enabled in the container.
@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import hashlib
 import json
 import re
 import subprocess
@@ -42,12 +41,11 @@ except ImportError:  # run as a script: python3 evalcfg/check_env.py
 DIGESTS = {"gemma4:e4b": "dc35e8d9c606", "gemma4:26b": "001e5dafc3c7"}
 
 
-def read_config(path: Path) -> Tuple[List[str], str]:
-    """(--set items from the header, sha256 of the body) of a build_config.py output."""
+def read_config(path: Path) -> Tuple[List[str], dict]:
+    """(--set items from the header, parsed settings) of a build_config.py output. Content, not
+    text, is compared: Hermes may rewrite the file with different formatting."""
     text = path.read_text(encoding="utf-8")
-    sets = re.findall(r"^# set: (.*)$", text, re.M)
-    body = "".join(line for line in text.splitlines(keepends=True) if not line.startswith("#"))
-    return sets, hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return re.findall(r"^# set: (.*)$", text, re.M), yaml.safe_load(text) or {}
 
 
 def check_config(paths: List[Path], arm: str, model: str, scenario: Optional[str]) -> Tuple[dict, str, List[str]]:
@@ -60,23 +58,30 @@ def check_config(paths: List[Path], arm: str, model: str, scenario: Optional[str
             continue
         sets, actual = read_config(path)
         settings, _, digest = bc.build(arm, model, scenario, sets)
-        if actual != digest:
+        if actual != settings:
             problems.append(f"{path}: not what build_config.py builds for --arm {arm} --model {model}"
                             + (f" --scenario {scenario}" if scenario else "")
                             + (f" (sets: {', '.join(sets)})" if sets else "") + "; rebuild it")
     return settings, digest, problems
 
 
-def check_restart(home: Path, configs: List[Path]) -> Tuple[Optional[float], List[str]]:
+def last_start(home: Path) -> Optional[float]:
     ledger = home / "gateway-starts.log"
     starts = ledger.read_text(encoding="utf-8").split() if ledger.is_file() else []
-    if not starts:
-        return None, [f"{ledger}: no gateway start recorded"]
-    started = float(starts[-1])
-    newest = max((p.stat().st_mtime for p in configs if p.is_file()), default=0.0)
-    if newest > started:
-        return started, ["config.yaml was written after the gateway started; restart the gateway"]
-    return started, []
+    return float(starts[-1]) if starts else None
+
+
+def check_restart(home: Path, configs: List[Path]) -> Tuple[Optional[float], List[str]]:
+    """(root gateway's last start, problems)."""
+    root, problems = last_start(home), []
+    for path in configs:
+        own = last_start(path.parent) if path.parent != home else None
+        started = own if own is not None else root
+        if started is None:
+            problems.append(f"{home / 'gateway-starts.log'}: no gateway start recorded")
+        elif path.is_file() and path.stat().st_mtime > started:
+            problems.append(f"{path} was written after its gateway started; restart that gateway")
+    return root, problems
 
 
 def _get(url: str, body: Optional[dict] = None) -> dict:
@@ -111,7 +116,8 @@ def check_plugins(container: str, wanted: List[str]) -> List[str]:
     if not wanted:
         return []
     try:
-        out = subprocess.run(["docker", "exec", container, "/opt/hermes/.venv/bin/hermes", "plugins", "list",
+        # As the hermes user: a root `hermes` run could leave root-owned files in the data dir.
+        out = subprocess.run(["docker", "exec", "-u", "hermes", container, "/opt/hermes/.venv/bin/hermes", "plugins", "list",
                               "--enabled", "--json"], capture_output=True, text=True, timeout=120, check=True).stdout
         enabled = {p["name"] for p in json.loads(out) if p.get("status") == "enabled"}
     except Exception as exc:

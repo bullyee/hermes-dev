@@ -1,3 +1,3 @@
-# Local large model, N=5 per scenario. On .219 via the 2022 machine (digest 001e5dafc3c7).
+# Local large model, N=5 per scenario. Expected digest: check_env.py DIGESTS.
 model:
   default: gemma4:26b
