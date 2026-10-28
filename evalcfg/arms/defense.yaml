@@ -5,8 +5,8 @@ memguard:
   recall_timeout: 30
   recall_thinking: false
   prefetch_timeout: 20
-  # Judge pinned to .219 gemma4:e4b whatever the agent model is (E6). base_url works today;
-  # model is read only once E6 lands - until then the judge follows the agent model.
+  # Judge pinned to .219 gemma4:e4b whatever the agent model is (E6). If e4b does not answer,
+  # memguard flags the entry instead of taking Hermes's fallback to the agent model.
   base_url: http://localhost:11414/v1
   model: gemma4:e4b
 
