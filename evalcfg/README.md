@@ -39,10 +39,10 @@ python3 evalcfg/check_env.py --hermes-home $H --container hermes-austin --arm de
 | 模型 | agent 模型和防禦組的判定模型，digest 不是 `check_env.py` 裡 `DIGESTS` 的值（例如 tunnel 接到別台機器）；雲端模型沒有 digest，只印名稱 |
 | plugin | `plugins.enabled` 列的 plugin 在容器裡沒有安裝或沒有啟用 |
 
-個別設定可用 `--set` 覆蓋（值照 YAML 解析），覆蓋的內容會記在產生的檔頭，`check_env.py` 也照檔頭比對。例如 E7 之前防禦組的容器還沒有 agcp_guard：
+個別設定可用 `--set` 覆蓋（值照 YAML 解析），覆蓋的內容會記在產生的檔頭，`check_env.py` 也照檔頭比對。例如 E7 之前防禦組的容器還沒有 agcp_guard，只留 memguard_hooks：
 
 ```bash
-python3 evalcfg/build_config.py --arm defense --model e4b --set 'plugins.enabled=[]' --out $H/config.yaml
+python3 evalcfg/build_config.py --arm defense --model e4b --set 'plugins.enabled=[memguard_hooks]' --out $H/config.yaml
 ```
 
 ## 跟 Hermes 預設不同的設定
@@ -65,7 +65,7 @@ python3 evalcfg/build_config.py --arm defense --model e4b --set 'plugins.enabled
 
 - **ASI06-1 情境**（`scenarios/asi06-1.yaml`）：兩組都開 holographic（`memory.provider: holographic`），1A、1B 要打 `fact_store`。`auto_extract: false` 跟 Hermes 預設相同，仍寫明，因為開了會在 session 結束時繞過 memguard 寫入記憶。
 - **ASI06-2 情境**（`scenarios/asi06-2.yaml`，Q3）：兩組都再關掉 `terminal`、`file`、`code_execution`，讓跨 profile 的測試只能用記憶工具。
-- **防禦組**（`arms/defense.yaml`）：memguard（判定逾時 30 秒、判定模型固定 e4b）和 `plugins.enabled`（agcp_guard；M1 做好後加 memguard_hooks）。
+- **防禦組**（`arms/defense.yaml`）：memguard（判定逾時 30 秒、判定模型固定 e4b）和 `plugins.enabled`（agcp_guard、memguard_hooks）。
 
 ## 檔案
 
@@ -110,7 +110,7 @@ API server 給 agent 的工具：一般情境 24 個（沒有 `session_search`�
 ## 還沒完成的相依
 
 1. **雲端模型（Q8）**：`models/cloud.yaml` 還是 TODO，API key 放容器的 `.env`。
-2. **防禦 plugin**：memguard_hooks（M1）做好後、agcp_guard 的設定（winston，E7）填好後，加進 `arms/defense.yaml`。
+2. **防禦 plugin**：agcp_guard 的設定（winston，E7）填好後，加進 `arms/defense.yaml`。
 3. **多 profile（M5）**：ASI06-2 的延遲工具還沒實際試過用 `tool_call` 呼叫，M5 驗環境時順便試。
 4. **評測容器（Q12）**：兩個容器套同一份設定，`SOUL.md` 和 skills 也要一致。
 5. **端點**：伺服器上 11414 的 tunnel 要開著；連不上時 `check_env.py` 會直接報錯。
