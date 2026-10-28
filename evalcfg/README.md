@@ -56,7 +56,7 @@ python3 evalcfg/build_config.py --arm defense --model e4b --set 'plugins.enabled
 | `agent.disabled_toolsets` | 無 | `[session_search]` | R3b：會撈回舊對話；PoC 停用，列為已知限制（M2） |
 | `auxiliary.title_generation.enabled` | `true` | `false` | R3b：被中止的輸入仍會送去產生標題（B4） |
 | `tools.tool_search.defer` | 含 `cronjob_manage` | 拿掉 `cronjob_manage` | 延遲載入時 e4b 有 2/3 次叫不到，ASI-10 會在 stock 因為這個原因失敗；拿掉後 e4b、26b 都 3/3 建立排程 |
-| `approvals.unattended_mode` | `deny` | `approve` | API 模式沒有人能按核准，預設會讓 ASI-02、05、10 在 stock 也失敗；擋不擋交給防禦。報告要寫明這是評測設定（任務清單 Q13） |
+| `approvals.unattended_mode` | `deny` | `approve` | API 模式沒有人能按核准，預設會讓 ASI-02、05、10 在 stock 也失敗；擋不擋交給防禦。報告要寫明這是評測設定 |
 | `plugins.enabled` | 未設 | `[]` | 只管掛 hook 的 plugin（agcp_guard 這類）：stock 一個都不開，防禦組另列。holographic 是記憶 provider，由 `memory.provider` 啟用，不受這項影響 |
 | `_config_version` | 未設 | `50` | 不寫的話容器重開時 Hermes 會改寫 `config.yaml`，`check_env.py` 就報設定不符 |
 
