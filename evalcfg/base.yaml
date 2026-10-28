@@ -16,15 +16,12 @@ model:
   # No temperature: Hermes sends none for the main model, so the model's own defaults apply
   # (check_env.py prints them for the report's environment table).
 
-memory:
-  provider: holographic        # ASI06-1 runs against fact_store; both arms
+# memory.provider stays Hermes's default (built-in memory only); scenarios/asi06-1.yaml turns on
+# holographic for ASI06-1.
 
 plugins:
-  hermes-memory-store:         # holographic provider settings
-    auto_extract: false        # Hermes default too; pinned because true writes facts at session end without memguard
   # Hook plugins only (agcp_guard and the like): none on stock, the defense arm lists its own.
-  # holographic is a memory provider: memory.provider above turns it on in both arms, whatever
-  # this list says.
+  # The holographic memory provider is not one of them; this list does not affect it.
   enabled: []
 
 agent:

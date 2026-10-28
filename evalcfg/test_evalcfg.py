@@ -17,7 +17,6 @@ def test_arms_differ_only_by_the_defense():
     defense, _, _ = bc.build("defense", "e4b")
     shared = {k for k in stock.keys() | defense.keys() if k not in ("memguard", "plugins")}
     assert all(stock.get(k) == defense.get(k) for k in shared)
-    assert stock["plugins"]["hermes-memory-store"] == defense["plugins"]["hermes-memory-store"]
     assert stock["memguard"] == {"enabled": False} and defense["memguard"]["enabled"] is True
     assert stock["plugins"]["enabled"] == [] and "agcp_guard" in defense["plugins"]["enabled"]
 
@@ -27,12 +26,19 @@ def test_base_settings_both_arms():
         config, _, _ = bc.build(arm, "e4b")
         assert config["agent"]["disabled_toolsets"] == ["session_search"]
         assert config["auxiliary"]["title_generation"]["enabled"] is False
-        assert config["memory"]["provider"] == "holographic"
-        assert config["plugins"]["hermes-memory-store"]["auto_extract"] is False
+        assert "memory" not in config and "hermes-memory-store" not in config["plugins"]  # built-in memory only
         assert config["approvals"]["unattended_mode"] == "approve"
         assert config["_config_version"] == 50
         defer = config["tools"]["tool_search"]["defer"]
         assert "cronjob_manage" not in defer and {"session_search", "process_manage", "todo_list"} <= set(defer)
+
+
+def test_holographic_only_in_asi06_1_and_in_both_arms():
+    for arm in ("stock", "defense"):
+        config, _, _ = bc.build(arm, "e4b", "asi06-1")
+        assert config["memory"]["provider"] == "holographic"
+        assert config["plugins"]["hermes-memory-store"]["auto_extract"] is False
+        assert config["plugins"]["enabled"] == bc.build(arm, "e4b")[0]["plugins"]["enabled"]
 
 
 def test_scenario_list_replaces_base_list():
