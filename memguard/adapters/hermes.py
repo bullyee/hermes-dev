@@ -7,11 +7,15 @@ their own OpenAI-compatible endpoint and model (default: the agent's own), so th
 same when the agent's model changes.
 
 Each write carries a stamp (``_make_stamp``: profile, session, turn, origin) into the gate's
-policy step. A write the policy stages goes to the user through Hermes's own memory-approval
-prompt (the harness shows it, so text in the conversation cannot answer it). When nobody can
-answer (gateway without a prompt, ``hermes chat -q``, cron, background review), a caller that
-passes ``stage`` puts the write into Hermes's pending store for ``/memory approve``; otherwise
-it is refused.
+policy step. After the judge returns, ``_veto`` blocks the write whatever the verdict when its tool
+call was abandoned meanwhile (Hermes stopped the run or timed the call out, but the call's thread
+runs on and would write after the run ended; ``plugins/memguard_hooks`` reports these ids), or when
+the session has an agcp.taint.v1 note (the other ASI defense, agcp_guard, aborted it).
+
+A write the policy stages goes to the user through Hermes's own memory-approval prompt (the
+harness shows it, so text in the conversation cannot answer it). When nobody can answer (gateway
+without a prompt, ``hermes chat -q``, cron, background review), a caller that passes ``stage``
+puts the write into Hermes's pending store for ``/memory approve``; otherwise it is refused.
 
 On read (``screen_recall``), entries are checked with the same judge before the agent sees them:
 built-in memory when a session loads it, holographic facts on every prefetch and fact_store read.
@@ -31,11 +35,12 @@ import json
 import logging
 import re
 import threading
+from pathlib import Path
 from typing import Callable, Iterable, Optional, Tuple
 
 from memguard.gate import Decision, MemGuard, refusal_message
 from memguard.judge import Verdict
-from memguard.types import Stamp
+from memguard.types import PolicyDecision, Stamp
 
 logger = logging.getLogger("memguard")
 
@@ -111,8 +116,10 @@ def _ask_user(decision: Decision) -> Optional[bool]:
 
 
 def _make_stamp() -> Stamp:
-    """Who and where the current write comes from. principal, session and turn are best effort
-    until M1 checks them under multiplexed profiles; tainted and delegated_from stay unset until M3."""
+    """Who and where the current write comes from: principal is the profile the write lands in,
+    session and turn the ids Hermes binds around every tool call (``agent/tool_executor.py``); outside
+    a tool call the session falls back to the gateway session key. tainted and delegated_from stay
+    unset until M3."""
     from tools import write_approval as wa
     principal = session_id = turn_id = ""
     try:
@@ -136,13 +143,15 @@ def guard_write(store: str, action: str, contents: Iterable[Optional[str]],
     if not enabled():
         return None
     guard = _guard()
-    stamp = _make_stamp()
+    stamp, tool_call_id = _make_stamp(), _tool_call_id()
     for content in contents:
         if not content or not content.strip():
             continue
-        decision = guard.check_write(content, store=store, action=action, stamp=stamp)
+        decision = guard.check_write(content, store=store, action=action, stamp=stamp,
+                                     veto=lambda: _veto(stamp, tool_call_id))
+        rule = (decision.veto or decision.policy).rule
         logger.info("memguard %s %s/%s: %s by %s (%s, %.1fs)", decision.id, store, action, decision.outcome,
-                    decision.policy.rule, decision.verdict.category, decision.seconds)
+                    rule, decision.verdict.category, decision.seconds)
         review = None
         if decision.outcome == "stage":
             answer = _ask_user(decision)
@@ -155,10 +164,59 @@ def guard_write(store: str, action: str, contents: Iterable[Optional[str]],
         if (message := refusal_message(decision, review)) is not None:
             return json.dumps({"success": False, "error": message, "memguard": {
                 "id": decision.id, "verdict": decision.verdict.verdict, "category": decision.verdict.category,
-                "outcome": decision.outcome, "rule": decision.policy.rule}},
+                "outcome": decision.outcome, "rule": rule}},
                 ensure_ascii=False)
     return None
 
+
+# --- Vetoes: blocks decided outside the judge, checked once it has returned (it can take 30 s) -----
+
+_abandoned: set = set()   # tool_call_ids Hermes stopped waiting for
+
+
+def note_abandoned(tool_call_id: str) -> None:
+    """``post_tool_call`` reported this call cancelled or timed out (``plugins/memguard_hooks``)."""
+    _abandoned.add(tool_call_id)
+
+
+def _tool_call_id() -> str:
+    from tools.approval_context import _approval_tool_call_id
+    return _approval_tool_call_id.get()
+
+
+def _veto(stamp: Stamp, tool_call_id: str) -> Optional[PolicyDecision]:
+    if tool_call_id and tool_call_id in _abandoned:
+        return PolicyDecision("block", "R-abandoned",
+                              f"tool call {tool_call_id} was abandoned (run stopped or timed out) while it was judged.")
+    if _blue_team_tainted(stamp.session_id):
+        return PolicyDecision("block", "R-taint-note", "藍隊污染註記: another defense aborted this session (agcp.taint.v1).")
+    return None
+
+
+# Reader copied from winston's agcp.taint.v1 spec (污染註記格式說明 §2, §5), not imported from agcp_guard.
+_SAFE_ID = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}")
+
+
+def _taint_file(session_id: str) -> Path:
+    from hermes_constants import get_hermes_home
+    name = (session_id if _SAFE_ID.fullmatch(session_id)
+            else "~h-" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:40])
+    return get_hermes_home() / "agcp" / "taint" / f"{name}.json"
+
+
+def _blue_team_tainted(session_id: str) -> bool:
+    """A note exists for the session. Only a missing file is clean: any other read error counts as
+    tainted (fail-closed). Opened by name, never listed: the directory also holds probes and temp files."""
+    if not session_id:
+        return False
+    try:
+        with open(_taint_file(session_id), encoding="utf-8") as fh:
+            fh.read(1)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 # --- Recall: what the agent may see of stored memory ---------------------------------------

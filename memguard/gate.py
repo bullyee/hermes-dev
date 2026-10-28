@@ -2,10 +2,13 @@
 
 A write runs judge -> conflict check -> allowlist -> policy. The policy's outcome decides:
 ``commit`` writes, ``stage`` goes to a human (the adapter asks inline or stages the write for
-later review), ``block`` refuses it. Every decision (commit included) goes to ``decisions.jsonl``
-as one line with the stamp and each step's result, and the human's answer to a staged write is
-appended there as a review record, so a run can be scored afterwards (including how often a
-flag was a false alarm). A staged write nobody could review is also kept in ``quarantine.jsonl``.
+later review), ``block`` refuses it. An adapter's ``veto`` runs last, after the judge returns, and
+blocks whatever the policy said (the run was stopped meanwhile, another defense marked the
+session); the policy's own decision stays in the log beside it. Every decision (commit included)
+goes to ``decisions.jsonl`` as one line with the stamp and each step's result, and the human's
+answer to a staged write is appended there as a review record, so a run can be scored afterwards
+(including how often a flag was a false alarm). A staged write nobody could review is also kept in
+``quarantine.jsonl``.
 
 The same judge runs again when memory is read back (``check_recall``), so an entry that reached
 disk without passing the write check (hand edit, another writer, an older rule set) is caught
@@ -23,7 +26,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from memguard import allowlist, conflict, policy
 from memguard.baseline import load as load_baseline
@@ -46,15 +49,18 @@ class Decision:
     conflict: Optional[ConflictResult] = None
     allowlist: Optional[AllowlistResult] = None
     policy: Optional[PolicyDecision] = None
+    veto: Optional[PolicyDecision] = None
 
     @property
     def outcome(self) -> str:
-        """``commit``, ``stage`` or ``block``: the policy's, else the verdict's own mapping."""
-        return self.policy.outcome if self.policy else _OUTCOME_BY_VERDICT[self.verdict.verdict]
+        """``commit``, ``stage`` or ``block``: the veto's, the policy's, else the verdict's own mapping."""
+        decided = self.veto or self.policy
+        return decided.outcome if decided else _OUTCOME_BY_VERDICT[self.verdict.verdict]
 
     @property
     def reason(self) -> str:
-        return self.policy.reason if self.policy else self.verdict.reason
+        decided = self.veto or self.policy
+        return decided.reason if decided else self.verdict.reason
 
     @property
     def commits(self) -> bool:
@@ -67,7 +73,8 @@ class MemGuard:
         self._dir = Path(state_dir)
         self._lock = threading.Lock()
 
-    def check_write(self, content: str, *, store: str, action: str, stamp: Optional[Stamp] = None) -> Decision:
+    def check_write(self, content: str, *, store: str, action: str, stamp: Optional[Stamp] = None,
+                    veto: Optional[Callable[[], Optional[PolicyDecision]]] = None) -> Decision:
         decision = self._judge(content, store, action)
         self._cache(content, decision)
         found = unknown = None
@@ -78,7 +85,8 @@ class MemGuard:
             decided = policy.decide(decision.verdict, stamp, found, unknown, store=store, action=action)
         except Exception as exc:  # like a judge failure: hold the write, never pass it
             decided = PolicyDecision("stage", "R-error", f"policy step failed: {exc}")
-        decision = replace(decision, stamp=stamp, conflict=found, allowlist=unknown, policy=decided)
+        decision = replace(decision, stamp=stamp, conflict=found, allowlist=unknown, policy=decided,
+                           veto=veto() if veto else None)
         self._log(decision)
         return decision
 
@@ -156,6 +164,8 @@ def _key(content: str) -> str:
 def refusal_message(decision: Decision, review: Optional[str] = None) -> Optional[str]:
     """Model-facing text for a write that did not commit, or None when it may proceed.
     ``review`` is the human's answer to a staged write (see ``MemGuard.record_review``)."""
+    if decision.veto:
+        return f"memguard blocked this memory write: {decision.reason} Nothing was saved."
     category = decision.verdict.category
     if decision.outcome == "block":
         return f"memguard blocked this memory write ({category}): {decision.reason} Nothing was saved."

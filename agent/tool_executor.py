@@ -747,7 +747,20 @@ def _dispatch_authorized_once(
     from agent.terminal_approval_batch import prepare_current_terminal
     prepare_current_terminal(ref)
     _advance_start_order(lambda: _begin_tool_execution(agent, ref, display_index))
-    return _run_with_activity_heartbeat(agent, ref.name, lambda: execute(ref.args))
+    return _run_with_activity_heartbeat(agent, ref.name, lambda: _execute_with_call_ids(agent, ref, execute))
+
+
+def _execute_with_call_ids(agent, ref: _ToolCallRef, execute) -> Any:
+    """``execute`` with the call's session/turn/tool_call ids bound in ``tools.approval_context``.
+    Registry tools bind them again in model_tools; inline and memory-provider tools (memory,
+    fact_store) see them only here. memguard reads them for its stamp and vetoes."""
+    from tools.approval_context import reset_current_observability_context, set_current_observability_context
+    tokens = set_current_observability_context(turn_id=getattr(agent, "_current_turn_id", "") or "",
+                                               tool_call_id=ref.call_id or "", session_id=agent.session_id or "")
+    try:
+        return execute(ref.args)
+    finally:
+        reset_current_observability_context(tokens)
 
 
 def _run_agent_tool_execution_middleware(

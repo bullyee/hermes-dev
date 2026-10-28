@@ -1,0 +1,6 @@
+name: memguard_hooks
+version: 0.1.0
+description: "memguard (ASI06 research layer): reports tool calls Hermes abandoned, so a memory write still being judged when its run stopped is refused instead of landing afterwards."
+author: "austin"
+provides_hooks:
+  - post_tool_call
