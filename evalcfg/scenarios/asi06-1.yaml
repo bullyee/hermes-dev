@@ -1,0 +1,8 @@
+# ASI06-1 only (Example 1; scenarios 1A and 1B attack holographic): the holographic memory provider
+# (fact_store, fact_feedback, a recall prefetch every turn) on top of built-in memory, in BOTH arms.
+# Every other scenario keeps Hermes's default, built-in memory only.
+memory:
+  provider: holographic
+plugins:
+  hermes-memory-store:         # holographic provider settings
+    auto_extract: false        # Hermes default too; pinned because true writes facts at session end without memguard
