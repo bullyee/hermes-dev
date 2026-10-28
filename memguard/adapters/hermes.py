@@ -1,9 +1,10 @@
-"""Hermes Agent adapter: runs the judge on Hermes's configured model and gates memory writes.
+"""Hermes Agent adapter: runs the judge through Hermes's LLM client and gates memory writes.
 
 Switched by ``memguard.enabled`` in config.yaml (default off, so stock behaviour is the
 baseline). ``memguard.timeout`` sets the judge call timeout in seconds (default 180; a CPU-only
-local model needs most of that). ``memguard.base_url`` sends judge calls to their own
-OpenAI-compatible endpoint (default: the agent's own).
+local model needs most of that). ``memguard.base_url`` and ``memguard.model`` give judge calls
+their own OpenAI-compatible endpoint and model (default: the agent's own), so the judge stays the
+same when the agent's model changes.
 
 Each write carries a stamp (``_make_stamp``: profile, session, turn, origin) into the gate's
 policy step. A write the policy stages goes to the user through Hermes's own memory-approval
@@ -69,10 +70,18 @@ def _hermes_llm(system: str, user: str, *, timeout_key: str = "timeout", default
     from agent.auxiliary_client import call_llm, extract_content_or_reasoning
     settings = _settings()
     timeout = float(settings.get(timeout_key, default_timeout))
-    # Optional own endpoint (same model): a single-request server would queue the judge behind the agent.
+    model = settings.get("model") or None
+    route: dict = {}
+    # Own endpoint and model are optional: a single-request server would queue the judge behind the
+    # agent, and without a model the judge follows the agent's main model.
     response = call_llm(messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                         temperature=0.0, timeout=timeout, base_url=settings.get("base_url") or None,
+                        model=model, route_info=route,
                         reasoning_config=None if thinking else {"enabled": False})
+    if model and route.get("model") != model:
+        # When the judge's endpoint fails (timeout, no connection), Hermes retries the call on the
+        # agent's main model. That verdict is not the pinned judge's: fail like any judge error (flag).
+        raise RuntimeError(f"answered by {route.get('model')}, not memguard.model {model}")
     return extract_content_or_reasoning(response) or ""
 
 
