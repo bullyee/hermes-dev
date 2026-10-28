@@ -108,9 +108,8 @@ API server 給 agent 的工具：一般情境 24 個（沒有 `session_search`�
 
 ## 還沒完成的相依
 
-1. **判定模型固定（E6）**：`memguard.model` 要等 E6 才會被讀取。在那之前跑 26b 或雲端模型時，判定會跟著 agent 換，`check_env.py` 印出的判定模型也不準。E6 要在跑大模型和雲端模型之前完成。
-2. **雲端模型（Q8）**：`models/cloud.yaml` 還是 TODO，API key 放容器的 `.env`。
-3. **防禦 plugin**：memguard_hooks（M1）做好後、agcp_guard 的設定（winston，E7）填好後，加進 `arms/defense.yaml`。
-4. **多 profile（M5）**：ASI06-2 的延遲工具還沒實際試過用 `tool_call` 呼叫，M5 驗環境時順便試。
-5. **評測容器（Q12）**：兩個容器套同一份設定，`SOUL.md` 和 skills 也要一致。
-6. **端點**：伺服器上 11414 的 tunnel 要開著；連不上時 `check_env.py` 會直接報錯。
+1. **雲端模型（Q8）**：`models/cloud.yaml` 還是 TODO，API key 放容器的 `.env`。
+2. **防禦 plugin**：memguard_hooks（M1）做好後、agcp_guard 的設定（winston，E7）填好後，加進 `arms/defense.yaml`。
+3. **多 profile（M5）**：ASI06-2 的延遲工具還沒實際試過用 `tool_call` 呼叫，M5 驗環境時順便試。
+4. **評測容器（Q12）**：兩個容器套同一份設定，`SOUL.md` 和 skills 也要一致。
+5. **端點**：伺服器上 11414 的 tunnel 要開著；連不上時 `check_env.py` 會直接報錯。
