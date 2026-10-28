@@ -13,5 +13,5 @@ memguard:
 plugins:
   enabled:
     - agcp_guard               # winston, winston-dev branch (E7)
-    # - memguard_hooks         # M1: post_tool_call hook (cancelled ids, M3 taint); add when it exists
+    - memguard_hooks           # M1: refuses memory writes of tool calls Hermes abandoned (R3)
   # agcp_guard:                # winston fills in (e.g. settings.modules per ASI)
